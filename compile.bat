@@ -1,0 +1,1 @@
+gcc html_parse.c -o html_parse && cls && .\html_parse
