@@ -82,18 +82,19 @@ typedef struct node_array {
 } node_array;
 
 node_array node_array_init();
+void       node_array_remove_last(node_array* q);
 bool       node_array_add(node_array* q, HTMLNode* node);
 bool       node_array_realloc(node_array* q);
 HTMLNode*  node_array_last(node_array q);
 
 typedef struct HTMLNode {
     const char*    name;
-    bool           is_text;
     str_view       text;
     str_view       innerHTML;
     str            innerText;
     NodeAttribute* attrib;
     node_array     children;
+    bool           is_text;
 } HTMLNode;
 
 HTMLNode* node_create(const char* name);
@@ -109,6 +110,7 @@ typedef enum parser_state_enum {
     PARSER_READ_STRING,
     PARSER_TAG,
     PARSER_COMMENT,
+    PARSER_CLOSING_TAG
 } parser_state_enum;
 
 typedef struct parser_state {
@@ -138,6 +140,7 @@ void parser_log_line(parser_state* p);
 
 HTMLNode* html_parse(const char* filename);
 
+#define HTML_PARSER_IMPL
 #ifdef HTML_PARSER_IMPL
 
 void attrib_log(NodeAttribute* attrib) {
@@ -195,8 +198,7 @@ HTMLNode* node_create(const char* name) {
             .count  = 0
         },
         .children = node_array_init()
-    };
-    
+    };    
     return node;
 }
 
@@ -457,6 +459,7 @@ HTMLNode* html_parse(const char* filename) {
                         str_buff[parser.str_pos] = '\0';
                         // create a new html node here.
                         HTMLNode* n = node_create(strdup(str_buff));
+
                         node_array_add(&parser.curr_node->children, n);
 
                         parser.curr_node = n;
@@ -474,10 +477,6 @@ HTMLNode* html_parse(const char* filename) {
                 } else {
                     stream_put_back(sp);
                     parser_attrib(&parser);
-                    
-                    printf("<%s> attribs: \n", parser.curr_node->name);
-                    attrib_log(parser.curr_node->attrib);
-                    printf("\n");
                     parser.state         = PARSER_START;
                     parser.parse_attribs = false;
                 }
@@ -508,10 +507,14 @@ HTMLNode* html_parse(const char* filename) {
                         parser.state = PARSER_COMMENT;
                     } else if (parser.current == '/') {
                         // TODO: Parse Closing TAG syntax: </TAG>
-                        
-                        html_parser_error(&parser, "Bad syntax. Expected start of tag name or comment or '/'");                        
-                        stream_skip_current(sp);
-                        parser.state = PARSER_START;
+                        if (!isalpha(stream_ahead(sp))) {
+                            stream_skip_current(sp);
+                            stream_skip_current(sp);
+                            html_parser_error(&parser, "Bad syntax. Expected tag name after '/'");
+                        } else {
+                            parser.state = PARSER_CLOSING_TAG;
+                            stream_skip_current(sp);
+                        }
                     }
                     break;
                 } else if (isalpha(parser.c)) {
@@ -519,6 +522,32 @@ HTMLNode* html_parse(const char* filename) {
                     parser.str_pos = 0;
                     stream_put_back(sp);
                 }
+                break;
+            }
+            case PARSER_CLOSING_TAG: {
+                char last_ch;
+                int current = sp->current;
+                parser_get_string(&parser, &last_ch, -1);
+                
+                if (parser.curr_node && strcmp(parser.str_buffer, parser.curr_node->name) == 0) {
+                    if (parser.node_queue.count > 1) {
+                        node_array_remove_last(&parser.node_queue);
+                        parser.curr_node = parser.node_queue.data[parser.node_queue.count - 1];
+                    }
+                } else {
+                    if (parser.node_queue.count > 1) {
+                        int curr = sp->current;
+                        sp->current = current;
+                        html_parser_error(&parser, "invalid closing tag");
+                        sp->current = curr;
+                    }
+                }
+
+                if (last_ch != '>') {
+                    while(stream_next(sp) != '>' && !stream_end(sp));
+                }
+                
+                parser.state   = PARSER_START;
                 break;
             }
             case PARSER_READ_STRING: {
@@ -648,7 +677,7 @@ bool node_array_realloc(node_array* q) {
     if (q->count >= q->capacity) {
         HTMLNode** tmp = q->data;
         size_t cap = q->capacity * QUEUE_GROWTH_FACTOR;
-        q->data = realloc(q->data, cap);
+        q->data = realloc(q->data, cap * sizeof(q->data[0]));
 
         if (!q->data) {
             q->data = tmp;
@@ -659,6 +688,11 @@ bool node_array_realloc(node_array* q) {
     }
 
     return true;
+}
+
+void node_array_remove_last(node_array* q) {
+    if (q->count > 0)
+        q->count--;
 }
 
 bool node_array_add(node_array* q, HTMLNode* node) {
