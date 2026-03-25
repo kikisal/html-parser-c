@@ -87,6 +87,12 @@ bool       node_array_add(node_array* q, HTMLNode* node);
 bool       node_array_realloc(node_array* q);
 HTMLNode*  node_array_last(node_array q);
 
+// maps child index to inner text.
+typedef struct InnerTextIndex { 
+    size_t index;
+    str    innerText;
+} InnerTextIndex;
+
 typedef struct HTMLNode {
     const char*    name;
     str_view       text;
@@ -113,6 +119,7 @@ typedef enum parser_state_enum {
     PARSER_CLOSING_TAG
 } parser_state_enum;
 
+// TODO: Parse innerHTML substrings for each node. 
 typedef struct parser_state {
     const char*       filename;
     HTMLNode*         root;
@@ -138,7 +145,11 @@ void parser_log_line(parser_state* p);
 // private
 #define _ERROR_DEFAULT_WINDOW_SIZE 8
 
+// Node Handling Interface
 HTMLNode* html_parse(const char* filename);
+void      inner_text_log(HTMLNode* node);
+// TODO: Add the rest of the functions to handle node search, creation, and so forth.
+
 
 #define HTML_PARSER_IMPL
 #ifdef HTML_PARSER_IMPL
@@ -506,7 +517,6 @@ HTMLNode* html_parse(const char* filename) {
                     } else if (parser.current == '!') {
                         parser.state = PARSER_COMMENT;
                     } else if (parser.current == '/') {
-                        // TODO: Parse Closing TAG syntax: </TAG>
                         if (!isalpha(stream_ahead(sp))) {
                             stream_skip_current(sp);
                             stream_skip_current(sp);
@@ -517,7 +527,7 @@ HTMLNode* html_parse(const char* filename) {
                         }
                     }
                     break;
-                } else if (isalpha(parser.c)) {
+                } else if (isalnum(parser.c)) {
                     parser.state   = PARSER_READ_STRING;
                     parser.str_pos = 0;
                     stream_put_back(sp);
@@ -562,7 +572,16 @@ HTMLNode* html_parse(const char* filename) {
                     text->innerHTML = to_str_view(strdup(parser.str_buffer));
 
                     node_array_add(&(parser.curr_node->children), text);
-                    // printf("%s\n", curr_node->children.data[0]->innerHTML.data);
+
+                    // TODO: Store inner text positions withing current tag children
+                    // For better rendering.
+                    // A inner text will always come before a child node:
+                    // INNER TEXT HERE
+                    // <TAG>...</TAG>
+                    // ANOTHER INNER TEXXT HERE
+                    // <TAG2>...</TAG>
+                    // store index and associated inner text.
+                    // struct InnerTextIndex { size_t index, char* innerText; };
 
                     // propagate this text to all nodes in the queue
                     for (int i = 0; i < parser.node_queue.count; ++i) {
@@ -767,5 +786,18 @@ char* temp_sprintf(const char* format, ...) {
 
     return tmp_buff;
 }
+
+void inner_text_log(HTMLNode* node) {
+    if (node->is_text) return;
+    
+    printf("%s => ", node->name);
+    str_log(node->innerText);
+    printf("\n");
+
+    for (int i = 0; i < node->children.count; ++i) {
+        inner_text_log(node->children.data[i]);
+    }
+}
+
 
 #endif // HTML_PARSER_IMPL
