@@ -108,6 +108,11 @@ typedef struct HTMLNode {
     bool           is_text;
 } HTMLNode;
 
+typedef struct HTMLDocument {
+    HTMLNode* root;
+    str       doctype;
+} HTMLDocument;
+
 HTMLNode* node_create(const char* name);
 
 // parser module
@@ -121,7 +126,8 @@ typedef enum parser_state_enum {
     PARSER_READ_STRING,
     PARSER_TAG,
     PARSER_COMMENT,
-    PARSER_CLOSING_TAG
+    PARSER_CLOSING_TAG,
+    PARSER_DOCTYPE
 } parser_state_enum;
 
 // TODO: Parse innerHTML substrings for each node. 
@@ -137,6 +143,7 @@ typedef struct parser_state {
     node_array        node_queue;
     HTMLNode*         curr_node;
     bool              parse_attribs;
+    str               doctype;
 } parser_state;
 
 void parser_get_string(parser_state* parser, char* last_ch, char quote);
@@ -151,7 +158,7 @@ void parser_log_line(parser_state* p);
 #define _ERROR_DEFAULT_WINDOW_SIZE 8
 
 // Node Handling Interface
-HTMLNode* html_parse(const char* filename);
+HTMLDocument html_parse(const char* filename);
 void      inner_text_log(HTMLNode* node);
 // TODO: Add the rest of the functions to handle node search, creation, and so forth.
 
@@ -429,11 +436,14 @@ void parser_attrib(parser_state* parser)
     }
 }
 
-HTMLNode* html_parse(const char* filename) {
+// TODOs:
+// Handle self closing tags
+
+HTMLDocument html_parse(const char* filename) {
     const char* src   = read_file(filename);
     
     if (!src)
-        return NULL;
+        return (HTMLDocument) {.doctype = {0}, .root = NULL};
 
     parser_state parser;
     parser.filename   = filename;
@@ -450,9 +460,11 @@ HTMLNode* html_parse(const char* filename) {
     parser.parse_attribs = false;
     node_array_add(&parser.node_queue, root);
 
-    str_stream* sp    = &parser.stream;
-    parser.state      = PARSER_START;
-    char* str_buff    = parser.str_buffer;
+    parser.doctype       = str_init();
+
+    str_stream* sp       = &parser.stream;
+    parser.state         = PARSER_START;
+    char* str_buff       = parser.str_buffer;
 
 
     while (parser.state != PARSER_FINISH) {
@@ -541,10 +553,23 @@ HTMLNode* html_parse(const char* filename) {
                         parser.str_pos = 0;
                     } else if (parser.current == '!') {
                         stream_skip_current(sp);
-                        if (!stream_expect(sp, "--", true)) {
-                            parser.state = PARSER_START;
+                        if (isalpha(stream_current(sp))) {
+                            stream_save(sp);
+                            char lc;
+                            parser_get_string(&parser, &lc, -1);
+                            if (strcmp(parser.str_buffer, "DOCTYPE") == 0 && lc == ' ') {
+                                parser.state = PARSER_DOCTYPE;
+                                stream_put_back(sp);
+                            } else {
+                                stream_restore(sp);
+                                parser.state = PARSER_START;
+                            }
                         } else {
-                            parser.state = PARSER_COMMENT;
+                            if (!stream_expect(sp, "--", true)) {
+                                parser.state = PARSER_START;
+                            } else {
+                                parser.state = PARSER_COMMENT;
+                            }
                         }
                     } else if (parser.current == '/') {
                         if (!isalpha(stream_ahead(sp))) {
@@ -626,9 +651,47 @@ HTMLNode* html_parse(const char* filename) {
 
                 break;
             };
+            case PARSER_DOCTYPE: {
+
+                // make sure you only read the first doctype found in entire file
+                bool was_null = parser.doctype.data == NULL;
+
+                str* doctype = &parser.doctype;
+                char lc;
+                char _tmp[2] = {'\0', '\0'};
+
+                do {
+                    stream_skip_spaces(sp);
+                    parser_get_string(&parser, &lc, -1);
+
+                    _tmp[0] = lc;
+                    
+                    if (stream_end(sp)) 
+                        break;
+
+                    if (was_null) {
+                        str_append(doctype, parser.str_buffer);
+                    }
+
+                    if (lc != '>') {
+                        if (was_null) {
+                            str_append(doctype, _tmp);
+                        }
+                        stream_put_back(sp);
+                    }
+                } while(lc != '>');
+
+                parser.state = PARSER_START;
+                
+                break;
+            }
         }
     }
-    return root;
+
+    return (HTMLDocument) {
+        .root    = root,
+        .doctype = parser.doctype
+    };
 }
 
 bool stream_end(str_stream* stream) {

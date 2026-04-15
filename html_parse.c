@@ -2,12 +2,12 @@
 #include "html_parser.h"
 
 int main() {
-    HTMLNode* node = html_parse("./test.html");
-    assert(node != NULL && "Node was null");
-    // printf("children: %d\n", node->children.count);
-    // inner_text_log(node);
+    HTMLDocument doc = html_parse("./test.html");
+    assert(doc.root != NULL && "Node was null");
 
-    printf("file parsed!\n");
+    printf("DOCTYPE => ");
+    str_log(doc.doctype);
+    printf("Children => %d\n", doc.root->children.count);
     
     return 0;
 }
