@@ -41,6 +41,8 @@ typedef struct str_stream {
     int col;
 } str_stream;
 
+static str_stream _strm_state;
+
 bool stream_end(str_stream* stream);
 char stream_next(str_stream* stream);
 char stream_ahead(str_stream* stream);
@@ -48,6 +50,9 @@ char stream_current(str_stream* stream);
 void stream_put_back(str_stream* stream);
 void stream_skip_current(str_stream* stream);
 void stream_skip_spaces(str_stream* stream);
+void stream_save(str_stream* stream);
+void stream_restore(str_stream* stream);
+bool stream_expect(str_stream* stream, const char* str, bool restore);
 
 str_stream str_to_stream(str_view str);
 
@@ -462,6 +467,13 @@ HTMLNode* html_parse(const char* filename) {
                     if (isalpha(c) || isdigit(c)) {
                         str_buff[parser.str_pos++] = c;
                     } else {
+
+                        // if (c == '<') {
+                        //     html_parser_error(&parser, "Bad syntax, invalid tag name start char '<'");
+                        //     parser.state = PARSER_START;
+                        //     break;
+                        // }
+
                         if (c != ' ' && c != '>' && c != -1) {
                             // stream_put_back(sp);
                             html_parser_error(&parser, "Bad syntax, expected space, '>' char, or end of file");
@@ -495,8 +507,21 @@ HTMLNode* html_parse(const char* filename) {
                 break;
             }
             case PARSER_COMMENT: {
-                printf("Parse comment!\n");
-                parser.state = PARSER_FINISH;
+                int curr = sp->current;
+                if (stream_expect(sp, "-->", false)) {
+                    parser.state = PARSER_START;
+                } else {
+                    if (stream_end(sp)) {
+                        parser.state = PARSER_FINISH;
+                        break;
+                    }
+                    
+                    int end = sp->current;
+                    int len = end - curr + 1;
+                    for (int i = 0; i < len; ++i) {
+                        stream_skip_current(sp);
+                    }
+                }
                 break;
             }
             case PARSER_START: {
@@ -515,7 +540,12 @@ HTMLNode* html_parse(const char* filename) {
                         parser.state   = PARSER_TAG;
                         parser.str_pos = 0;
                     } else if (parser.current == '!') {
-                        parser.state = PARSER_COMMENT;
+                        stream_skip_current(sp);
+                        if (!stream_expect(sp, "--", true)) {
+                            parser.state = PARSER_START;
+                        } else {
+                            parser.state = PARSER_COMMENT;
+                        }
                     } else if (parser.current == '/') {
                         if (!isalpha(stream_ahead(sp))) {
                             stream_skip_current(sp);
@@ -527,7 +557,7 @@ HTMLNode* html_parse(const char* filename) {
                         }
                     }
                     break;
-                } else if (isalnum(parser.c)) {
+                } else /* (isalnum(parser.c)) */ {
                     parser.state   = PARSER_READ_STRING;
                     parser.str_pos = 0;
                     stream_put_back(sp);
@@ -562,7 +592,7 @@ HTMLNode* html_parse(const char* filename) {
             }
             case PARSER_READ_STRING: {
                 parser.c = stream_next(sp);
-                if (parser.c == ' ' || parser.c == '\n' || (!isalpha(parser.c) && !isdigit(parser.c))) {
+                if (parser.c == ' ' || parser.c == '\n' || parser.c == '<' /* || (!isalpha(parser.c) && !isdigit(parser.c)) */) {
                     stream_put_back(sp);
                     parser.state = PARSER_START;
                     parser.str_buffer[parser.str_pos] = '\0';
@@ -676,6 +706,32 @@ str_stream str_to_stream(str_view str) {
         .current = 0,
         .str = str
     };
+}
+
+void stream_save(str_stream* stream) {
+    _strm_state = *stream;
+}
+
+void stream_restore(str_stream* stream) {
+    *stream = _strm_state;
+}
+
+bool stream_expect(str_stream* stream, const char* str, bool restore) {
+    int len = strlen(str);
+
+    stream_save(stream);
+
+    for (int i = 0; i < len; ++i) {
+        if (stream_current(stream) != str[i]) {
+            if (restore)
+                stream_restore(stream);
+            return false;
+        }
+
+        stream_skip_current(stream);
+    }
+
+    return true;
 }
 
 // node queue

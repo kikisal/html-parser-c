@@ -1,1 +1,1 @@
-gcc html_parse.c -o html_parse && cls && .\html_parse
+gcc html_parse.c -o .\bin\html_parse && cls && .\bin\html_parse

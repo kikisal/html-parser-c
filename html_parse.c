@@ -4,8 +4,10 @@
 int main() {
     HTMLNode* node = html_parse("./test.html");
     assert(node != NULL && "Node was null");
-    printf("children: %d\n", node->children.count);
-    inner_text_log(node);
+    // printf("children: %d\n", node->children.count);
+    // inner_text_log(node);
+
+    printf("file parsed!\n");
     
     return 0;
 }
